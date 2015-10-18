@@ -2,8 +2,6 @@
 #include <iostream>
 #include "timer.h"
 
-#include <opencv2/imgproc/imgproc.hpp>
-
 struct Cluster
 {
     Cluster(int x, int y)
@@ -36,6 +34,9 @@ struct Cluster
         return x_min >= 0;
     }
 
+    int width() const { return x_max - x_min; }
+    int height() const { return y_max - y_min; }
+
     int x_min, y_min, x_max, y_max;
 };
 
@@ -54,7 +55,7 @@ int main(int argc, char **argv)
 
     cv::Mat image;
 
-    for(int i = 0; vc.read(image); ++i)
+    for(int i_frame = 0; vc.read(image); ++i_frame)
     {
 
 //        image = cv::Mat(480, 640, CV_8UC3, cv::Scalar(0, 0, 0));
@@ -62,132 +63,97 @@ int main(int argc, char **argv)
 //        cv::rectangle(image, cv::Point(200, 200), cv::Point(400, 300), cv::Scalar(255, 255, 255), CV_FILLED);
 //        cv::rectangle(image, cv::Point(100, 300), cv::Point(400, 400), cv::Scalar(255, 255, 255), CV_FILLED);
 
+        if (i_frame < 700)
+            continue;
+
         int width = image.cols;
         int height = image.rows;
 
         int threshold = 200;
+
+        Timer timer;
 
         std::vector<Cluster> rects;
         std::vector<int> rect_idx;
 
         cv::Mat blob_map(height, width, CV_32SC1, cv::Scalar(-1));
 
-        int n = 0;
-
-        Timer timer;
-
-        /// Convert the image to Gray
-        cv::Mat image_gray;
-        cv::cvtColor( image, image_gray, CV_RGB2GRAY );
-
-        cv::threshold(image_gray, image_gray, 200, 255, 0);
-
-//        unsigned char* ptr = &image_gray.at<unsigned char>(0, 0);
-//        for(int j = 0; j < width * height; ++j)
-//        {
-//            if (*ptr < 200)
-//                *ptr = 0;
-//            ++ptr;
-//        }
-
-
-        cv::Mat canny_output;
-        std::vector<std::vector<cv::Point> > contours;
-        std::vector<cv::Vec4i> hierarchy;
-
-        int thresh = 128;
-
-        /// Detect edges using canny
-        cv::Canny( image_gray, canny_output, thresh, thresh*2, 3 );
-
-        /// Find contours
-        findContours( canny_output, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, cv::Point(0, 0) );
-
-        /// Draw contours
-//        cv::Mat drawing = cv::Mat::zeros( canny_output.size(), CV_8UC3 );
-        for( int i = 0; i< contours.size(); i++ )
+        for(int y = 1; y < height - 1; ++y)
         {
-            cv::Scalar color( 255, 0, 0 );
-            cv::drawContours( image, contours, i, color, 2, 8, hierarchy, 0, cv::Point() );
+            for(int x = 1; x < width - 1; ++x)
+            {
+                const cv::Vec3b& c = image.at<cv::Vec3b>(y, x);
+                if (c[0] < threshold || c[1] < threshold || c[2] < threshold)
+                {
+//                    image.at<cv::Vec3b>(y, x) = cv::Vec3b(0, 0, 0);
+                    continue;
+                }
+
+                int b_left = blob_map.at<int>(y, x - 1);
+                int b_up = blob_map.at<int>(y - 1, x);
+                int& b = blob_map.at<int>(y, x);
+
+                if (b_left >= 0)
+                {
+                    if (b_up >= 0 && rect_idx[b_left] != rect_idx[b_up])
+                    {
+                        // Fuse
+                        Cluster& r1 = rects[rect_idx[b_left]];
+                        Cluster& r2 = rects[rect_idx[b_up]];
+
+//                        if (!r1.valid() || !r2.valid())
+//                            std::cout << "ERROR!" << std::endl;
+
+                        r1.fuseInto(r2);
+                        r2.invalidate();
+
+                        b = b_left;
+                        rect_idx[b_up] = rect_idx[b_left];
+                    }
+                    else
+                    {
+                        b = b_left;
+                    }
+                }
+                else if (b_up >= 0)
+                {
+                    b = b_up;
+                }
+                else
+                {
+                    b = rects.size();
+                    rect_idx.push_back(b);
+                    rects.push_back(Cluster(x, y));
+                }
+
+                Cluster& r = rects[rect_idx[b]];
+                r.addPoint(x, y);
+
+                blob_map.at<int>(y, x + 1) = b;
+                blob_map.at<int>(y + 1, x) = b;
+                blob_map.at<int>(y + 2, x) = b;
+                blob_map.at<int>(y + 3, x) = b;
+                blob_map.at<int>(y + 4, x) = b;
+                blob_map.at<int>(y + 5, x) = b;
+                blob_map.at<int>(y + 6, x) = b;
+            }
+
         }
 
         timer.stop();
-        std::cout << timer.getElapsedTimeInMilliSec() << " ms conversion" << std::endl;
+        std::cout << i_frame << " " << timer.getElapsedTimeInMilliSec() << " ms" << std::endl;
 
+        for(unsigned int j = 0; j < rects.size(); ++j)
+        {
+            const Cluster& r = rects[j];
+            if (!r.valid())
+                continue;
 
-//        cv::imshow("drawing", drawing);
-//        cv::waitKey(3);
-
-//        unsigned char* ptr = &image_gray.at<unsigned char>(1, 1);
-
-//        for(int y = 1; y < height; ++y)
-//        {
-//            for(int x = 1; x < width; ++x)
-//            {
-////                const cv::Vec3b& c = image.at<cv::Vec3b>(i_pixel);
-////                const cv::Vec3b& c = *ptr;
-//                ++ptr;
-//                if (*ptr > 200)
-//                {
-//                    ++n;
-////                    image.at<cv::Vec3b>(y, x) = cv::Vec3b(0, 0, 0);
-//                    continue;
-//                }
-
-////                int b_left = blob_map.at<int>(y, x - 1);
-////                int b_up = blob_map.at<int>(y - 1, x);
-////                int& b = blob_map.at<int>(y, x);
-
-////                if (b_left >= 0)
-////                {
-////                    if (b_up >= 0 && rect_idx[b_left] != rect_idx[b_up])
-////                    {
-////                        // Fuse
-////                        Cluster& r1 = rects[rect_idx[b_left]];
-////                        Cluster& r2 = rects[rect_idx[b_up]];
-
-////                        if (!r1.valid() || !r2.valid())
-////                            std::cout << "ERROR!" << std::endl;
-
-////                        r1.fuseInto(r2);
-////                        r2.invalidate();
-
-////                        b = b_left;
-////                        rect_idx[b_up] = rect_idx[b_left];
-////                    }
-////                    else
-////                    {
-////                        b = b_left;
-////                    }
-////                }
-////                else if (b_up >= 0)
-////                {
-////                    b = b_up;
-////                }
-////                else
-////                {
-////                    b = rects.size();
-////                    rect_idx.push_back(b);
-////                    rects.push_back(Cluster(x, y));
-////                }
-
-////                Cluster& r = rects[rect_idx[b]];
-////                r.addPoint(x, y);
-//            }
-
-//        }
-
-//        std::cout << n << std::endl;
-
-//        timer.stop();
-//        std::cout << timer.getElapsedTimeInMilliSec() << " ms" << std::endl;
-
-//        for(unsigned int j = 0; j < rects.size(); ++j)
-//        {
-//            const Cluster& r = rects[j];
-//            if (r.valid())
-//                cv::rectangle(image, cv::Rect(r.x_min, r.y_min, r.x_max - r.x_min, r.y_max - r.y_min), cv::Scalar(255, 0, 0));
-//        }
+            if (r.height() > 4 * r.width())
+                cv::rectangle(image, cv::Rect(r.x_min, r.y_min, r.x_max - r.x_min, r.y_max - r.y_min), cv::Scalar(0, 0, 255), 2);
+            else
+                cv::rectangle(image, cv::Rect(r.x_min, r.y_min, r.x_max - r.x_min, r.y_max - r.y_min), cv::Scalar(255, 0, 0));
+        }
 
 
         cv::imshow("video", image);
