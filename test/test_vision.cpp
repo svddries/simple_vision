@@ -63,8 +63,8 @@ int main(int argc, char **argv)
 //        cv::rectangle(image, cv::Point(200, 200), cv::Point(400, 300), cv::Scalar(255, 255, 255), CV_FILLED);
 //        cv::rectangle(image, cv::Point(100, 300), cv::Point(400, 400), cv::Scalar(255, 255, 255), CV_FILLED);
 
-        if (i_frame < 700)
-            continue;
+//        if (i_frame < 700)
+//            continue;
 
         int width = image.cols;
         int height = image.rows;
